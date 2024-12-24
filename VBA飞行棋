@@ -1,0 +1,1346 @@
+Dim currentPlayer As Integer ' 当前玩家
+Dim playerRanks(1 To 20) As Integer ' 存储每个玩家的名次
+Dim finishedPlayers As Integer ' 记录已完成的玩家数量
+Dim winners As String ' 存储获胜者
+Dim playerColors As Variant ' 玩家颜色
+Dim gameEnded As Boolean ' 游戏结束标记
+Dim playerPositions(1 To 20) As Integer ' 存储玩家位置
+Dim playerCanMove(1 To 20) As Boolean ' 存储每个玩家是否可以移动
+Public playerCount As Integer ' 当前玩家数量
+Public playerNames(1 To 20) As String ' 存储玩家名称
+Dim playerPauseRounds(1 To 20) As Integer ' 存储每个玩家的暂停回合数
+Dim countdownActive() As Boolean
+Dim timers() As Variant
+Dim pausedTime() As Double
+Dim isPaused() As Boolean
+Dim timersCount As Integer
+Public wsPath As Worksheet
+Public MustRollSix As Boolean
+Public AllowReRoll As Boolean
+Public UseSpecialRules As Boolean
+Public ControlTime As Boolean
+Public isCustomCountdownEnabled As Boolean
+Public FourthOption As Boolean
+Dim playerActionPaused() As Boolean
+Dim customPausedTime() As Double ' 存储自定义计时器的暂停时间
+Dim customIsPaused() As Boolean ' 存储每个自定义计时器是否暂停的状态
+Dim customCountdownActive() As Boolean ' 存储每个自定义计时器是否处于活动状态
+Dim customTimers() As Variant
+Dim customTimersCount As Integer
+Dim diceRolling As Boolean
+Dim stopTime As Double
+Sub ShowGameSetupForm()
+    UserForm1.Show
+End Sub
+
+Sub 初始化游戏(playerCount As Integer, wsPath As Worksheet, MustRollSix As Boolean, AllowReRoll As Boolean, UseSpecialRules As Boolean, ControlTime As Boolean, isCustomCountdownEnabled As Boolean)
+    
+      If isCustomCountdownEnabled Then
+      ' 创建设置时间按钮
+        CreateSetCustomTimeButton
+
+    End If
+    
+    ' 复制指定单元格范围到当前工作表
+    Call 复制单元格范围   ' 传入工作表参数
+    
+
+    currentPlayer = 1
+    finishedPlayers = 0
+    winners = ""
+    gameEnded = False
+
+    ' 初始化玩家数据
+    Dim i As Integer
+    For i = 1 To playerCount
+        playerRanks(i) = 0
+        playerPositions(i) = 0
+        playerCanMove(i) = False ' 初始化为不能移动
+        playerPauseRounds(i) = 0 ' 初始化为0
+        playerNames(i) = Application.InputBox("请输入玩家" & i & "的名称:", "玩家名称设置", "玩家" & i)
+    Next i
+        ' 初始化 playerActionPaused 数组
+    ReDim playerActionPaused(1 To playerCount)
+    For i = 1 To playerCount
+        playerActionPaused(i) = False ' 默认每个玩家不暂停
+    Next i
+
+    删除超级表数据行和倒计时按钮
+    Range("F1").Value = playerNames(1) & "准备掷骰子"
+
+    ' 初始化玩家颜色
+    playerColors = Array(RGB(255, 0, 0), RGB(0, 255, 0), RGB(0, 0, 255), RGB(255, 255, 0), _
+                         RGB(255, 165, 0), RGB(128, 0, 128), RGB(0, 255, 255), RGB(255, 192, 203), _
+                         RGB(128, 128, 0), RGB(0, 128, 128), RGB(0, 0, 128), RGB(128, 128, 128), _
+                         RGB(192, 192, 192), RGB(255, 105, 180), RGB(0, 100, 0), RGB(255, 215, 0), _
+                         RGB(255, 20, 147), RGB(139, 69, 19), RGB(65, 105, 225), RGB(255, 0, 255))
+     
+     ' 设置棋盘和玩家形状
+    Dim shape As shape
+    Dim startX As Double, startY As Double
+    Dim shapeSize As Double, spacing As Double
+    Dim shuffledColors As Variant
+
+    startX = 10
+    startY = 10
+    shapeSize = 35
+    spacing = 35
+
+    ' 随机打乱颜色数组
+    shuffledColors = ShuffleColors(playerColors)
+
+    ' 清除棋盘颜色
+    ClearBoardColors
+
+    ' 清除现有的玩家形状
+    ClearPlayerShapes
+
+    ' 创建新的玩家形状
+    For i = 1 To playerCount
+        Set shape = ActiveSheet.Shapes.AddShape(msoShapeOval, startX, startY + (i - 1) * spacing, shapeSize, shapeSize)
+        shape.Fill.ForeColor.RGB = shuffledColors(i - 1)
+        shape.Line.Visible = msoFalse
+        shape.Name = "Player" & i
+        shape.TextFrame.Characters.Text = playerNames(i)
+        shape.TextFrame.HorizontalAlignment = xlHAlignCenter
+        shape.TextFrame.VerticalAlignment = xlVAlignCenter
+        shape.TextFrame.Characters.Font.Size = 10
+        shape.TextFrame.Characters.Font.Color = RGB(255, 255, 255)
+    Next i
+End Sub
+
+Function ShuffleColors(colors As Variant) As Variant
+    Dim i As Integer, j As Integer, temp As Variant
+    Dim colorCount As Integer
+
+    colorCount = UBound(colors) - LBound(colors) + 1
+    Randomize
+
+    For i = colorCount - 1 To 1 Step -1
+        j = Int((i + 1) * Rnd)
+        ' 交换颜色
+        temp = colors(i)
+        colors(i) = colors(j)
+        colors(j) = temp
+    Next i
+
+    ShuffleColors = colors
+End Function
+Sub 复制单元格范围()
+    ' 复制指定单元格范围到当前工作表
+    Dim sourceRange As Range
+    Set sourceRange = wsPath.Range("F2:O100") ' 修改为需要复制的范围
+    sourceRange.Copy Destination:=ActiveSheet.Range("F2") ' 粘贴到当前工作表的B2位置
+End Sub
+Function 获取棋盘单元格(position As Integer) As Range
+    Dim cellAddress As String
+    Dim wsTask As Worksheet
+    Dim totalCells As Integer
+    Dim maxCells As Integer
+    Dim firstCell As Variant
+    Dim lastCell As Variant
+    
+    Set wsTask = ThisWorkbook.Sheets("Sheet1") ' 存放任务的工作表
+
+    ' 获取格子的总数
+    totalCells = wsPath.cells(Rows.Count, 1).End(xlUp).row
+
+        ' 获取第一个和最后一个单元格的值
+    firstCell = wsPath.cells(1, 1).Value
+    lastCell = wsPath.cells(totalCells, 1).Value
+
+    ' 判断是否需要减 1
+    If firstCell = lastCell Then
+        maxCells = Application.Max(totalCells - 1, 0)
+    Else
+        maxCells = totalCells
+    End If
+
+    If position >= 0 And position < totalCells Then
+        cellAddress = wsPath.cells(position + 1, 1).Value ' 从 A 列读取地址
+        Set 获取棋盘单元格 = wsTask.Range(cellAddress) ' 从 Sheet1 返回对应的任务单元格
+    Else
+        Set 获取棋盘单元格 = wsTask.Range("A1") ' 返回空白单元格
+    End If
+End Function
+Sub 删除超级表数据行和倒计时按钮()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+
+    ' 删除所有计时器相关数据
+    timersCount = 0
+    Erase timers, pausedTime, isPaused, countdownActive
+
+       Dim btn As Object
+    For Each btn In ws.Buttons
+        If InStr(btn.Name, "_" & taskRow) > 0 Then
+            btn.Delete
+        End If
+    Next btn
+
+    ' 删除名为 "SuperTable" 的表数据行
+    Dim tbl As ListObject
+    
+    ' 检查是否存在名为 "SuperTable" 的表
+    On Error Resume Next
+    Set tbl = ws.ListObjects("SuperTable")
+    On Error GoTo 0
+    
+    ' 如果表存在，逐行删除所有数据行
+    If Not tbl Is Nothing Then
+        Do While tbl.ListRows.Count > 0
+            tbl.ListRows(1).Delete
+        Loop
+    End If
+End Sub
+Sub ClearBoardColors()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1") ' 替换为实际工作表名称
+    ws.cells.Interior.ColorIndex = xlNone ' 清除颜色
+End Sub
+
+Sub ClearPlayerShapes()
+    Dim shape As shape
+    For Each shape In ActiveSheet.Shapes
+        If shape.Name Like "Player*" Then
+            shape.Delete ' 删除玩家形状
+        End If
+    Next shape
+End Sub
+
+Sub StartDiceRolling()
+    ' 防止重复点击
+    If diceRolling Then Exit Sub
+    diceRolling = True
+
+    ' 记录停止时间为当前时间 + 5秒
+    stopTime = Now + TimeSerial(0, 0, 5)
+
+    ' 开始滚动动画
+    Call AnimateDice
+End Sub
+
+Sub AnimateDice()
+    ' 如果停止标记为 False，则退出
+    If Not diceRolling Then Exit Sub
+
+    ' 获取随机骰子值 (Unicode值对应骰子符号)
+    Dim diceValue As Integer
+    diceValue = Application.WorksheetFunction.RandBetween(9856, 9861) ' 9856对应?, 9861对应?
+
+    ' 显示骰子符号
+    Dim diceSymbol As String
+    diceSymbol = Application.WorksheetFunction.Unichar(diceValue)
+    ThisWorkbook.Sheets("Sheet1").Range("B1").Value = diceSymbol
+
+    ' 允许事件处理（如点击停止按钮）
+    DoEvents
+
+    ' 如果还没有达到停止时间，则继续滚动
+    If diceRolling And Now < stopTime Then
+        Application.OnTime Now + TimeSerial(0, 0, 0.1), "AnimateDice"
+    Else
+        ' 达到停止时间，停止滚动并获取最终骰子点数
+        Call StopDiceRolling
+    End If
+End Sub
+
+Sub StopDiceRolling()
+    ' 停止滚动
+    diceRolling = False
+
+    ' 获取最终骰子点数 (从 B1 的符号中计算)
+    Dim diceValue As Integer
+    diceValue = AscW(ThisWorkbook.Sheets("Sheet1").Range("B1").Value)
+
+    Dim finalDiceNumber As Integer
+    finalDiceNumber = diceValue - 9855 ' 计算实际点数
+
+    ' 调用处理逻辑
+    Call 飞行棋(finalDiceNumber)
+End Sub
+Sub 飞行棋(diceRoll As Integer)
+    Dim currentPlayerPos As Integer
+    Dim newPosition As Integer
+    Dim task As String
+    Dim move As Integer
+    Dim taskRow As Integer
+    Dim ws As Worksheet
+    Dim totalCells As Integer
+    Dim countdownTime As Date
+    Dim countdownActive As Boolean
+    Dim timersPaused As Boolean
+    Dim timersStop As Boolean
+    Dim pauseButton As Object
+    Dim continueButton As Object
+    Dim stopButton As Object
+    Dim maxCells As Integer
+    Dim isPaused As Boolean
+    Dim countdownMinutes As Integer
+    Dim regex As Object
+    Set regex = CreateObject("VBScript.RegExp")
+
+    ' 设置工作表为Sheet1
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+
+    ' 获取格子的总数
+    totalCells = wsPath.cells(Rows.Count, 1).End(xlUp).row
+
+        ' 判断是否需要减 1
+    If firstCell = lastCell Then
+        maxCells = Application.Max(totalCells - 1, 0)
+    Else
+        maxCells = totalCells
+    End If
+    Debug.Print "PlayerActionPaused array size: " & UBound(playerActionPaused) - LBound(playerActionPaused) + 1
+
+    If gameEnded Then
+        MsgBox "游戏已经结束，无法继续掷骰子！", vbExclamation
+        Exit Sub
+    End If
+    ' 检查当前玩家是否在倒计时暂停状态
+    If playerActionPaused(currentPlayer) Then
+        MsgBox playerNames(currentPlayer) & " 目前处于倒计时暂停状态，无法进行本轮操作。", vbExclamation
+        GoTo NextPlayer ' 跳到下一个玩家
+    End If
+    ' 检查当前玩家是否在暂停状态
+    If playerPauseRounds(currentPlayer) > 0 Then
+    ' 引用表格
+    Set tbl = ws.ListObjects("SuperTable")
+    
+    ' 找到表格中下一个可用的行
+    ' 假设 "SuperTable" 已经有标题，我们将在下一个可用的行中添加新任务
+    taskRow = tbl.ListRows.Count + 1
+
+    ' 在合适的列中插入消息
+    ' 假设要将消息插入第13列（例如列M）
+    tbl.ListRows.Add
+    tbl.DataBodyRange(taskRow, 1).Value = playerNames(currentPlayer) & " 由于暂停状态，无法掷骰子。还有 " & playerPauseRounds(currentPlayer) & " 回合。"
+
+    ' 更新暂停回合数
+    playerPauseRounds(currentPlayer) = playerPauseRounds(currentPlayer) - 1
+
+    ' 跳到下一个玩家
+    GoTo NextPlayer
+End If
+    ' 检查当前玩家是否已经到达终点
+    currentPlayerPos = playerPositions(currentPlayer)
+    If currentPlayerPos >= maxCells Then
+        ws.Range("F1").Value = playerNames(currentPlayer) & " 已经到达终点，无需掷骰子。"
+        GoTo NextPlayer
+    End If
+
+    If MustRollSix Then
+        ' 开局投掷6的逻辑
+        ' 只有在投掷到6的情况下，玩家才能开始移动
+        If Not playerCanMove(currentPlayer) Then
+            If diceRoll = 6 Then
+                MsgBox playerNames(currentPlayer) & " 投到6，可以开始移动！请再掷一次决定前进的步数。", vbInformation
+                playerCanMove(currentPlayer) = True
+                
+               ' 直接调用动画进行第二次投掷
+            Call StartDiceRolling
+            Exit Sub
+        Else
+            MsgBox playerNames(currentPlayer) & " 投掷点数为：" & diceRoll & "，不能开始移动。轮到下一个玩家。", vbExclamation
+            GoTo NextPlayer
+        End If
+    End If
+         newPosition = currentPlayerPos + diceRoll
+    Else
+        ' 默认逻辑，不需要开局投掷
+        newPosition = currentPlayerPos + diceRoll
+    End If
+    If AllowReRoll Then '终点回退
+    ' 计算新位置
+    Debug.Print "新位置: " & newPosition
+        If newPosition > maxCells Then
+            playerPositions(currentPlayer) = maxCells ' 设置为最后一格
+            Dim backwardSteps As Integer
+            backwardSteps = newPosition - maxCells ' 计算需要后退的步数
+            If backwardSteps > 0 Then
+                playerPositions(currentPlayer) = maxCells - backwardSteps ' 更新新位置为后退后的位置
+            End If
+        Else
+            Debug.Print "当前玩家位置: " & currentPlayerPos
+            playerPositions(currentPlayer) = newPosition
+            Debug.Print "新位置: " & newPosition
+        End If
+    Else
+        ' 默认逻辑，终点不回退
+        If newPosition >= maxCells Then
+            playerPositions(currentPlayer) = maxCells ' 设置为最后一格
+        Else
+            playerPositions(currentPlayer) = newPosition
+        End If
+    End If
+
+    ' 更新旧位置颜色
+    If currentPlayerPos >= 0 Then
+        ws.Range(获取棋盘单元格(currentPlayerPos).Address).Interior.ColorIndex = xlNone
+    End If
+
+If UseSpecialRules Then ' 前进后退循环
+loopCount = 0
+maxLoopCount = 10
+isPaused = False ' 初始化暂停状态
+countdownMinutes = 0 ' 初始化倒计时为0
+
+Do
+    ' 获取任务并处理
+    newPosition = playerPositions(currentPlayer)
+    task = ws.Range(获取棋盘单元格(newPosition).Address).Value
+    ws.Range("M1").Value = playerNames(currentPlayer) & " 任务：" & task
+
+    ' 处理前进后退任务
+    If InStr(task, "前进") > 0 Then
+        move = Val(Split(task, "前进")(1))
+        newPosition = Application.Min(newPosition + move, maxCells)
+    ElseIf InStr(task, "后退") > 0 Then
+        move = Val(Split(task, "后退")(1))
+        newPosition = Application.Max(newPosition - move, 0)
+    End If
+
+    ' 更新玩家位置
+    playerPositions(currentPlayer) = newPosition
+
+    ' 检查位置是否合法
+    If newPosition < 0 Or newPosition > maxCells Then
+        MsgBox "新位置越界！"
+        Exit Do
+    End If
+
+    ' 处理任务：回到起点、终点
+    If InStr(task, "起点") > 0 Then
+        newPosition = 0
+        playerCanMove(currentPlayer) = False
+        playerPositions(currentPlayer) = newPosition
+    End If
+    If InStr(task, "终点") > 0 Then
+        newPosition = maxCells
+        playerPositions(currentPlayer) = newPosition
+    End If
+
+    ' 处理暂停任务
+    If InStr(task, "暂停") > 0 Then
+        playerPauseRounds(currentPlayer) = Val(Split(task, "暂停")(1))
+        isPaused = True ' 设置暂停状态
+    End If
+
+    ' 提取倒计时任务（不立即启动）
+If InStr(task, "分钟") > 0 Or InStr(task, "秒") > 0 Then
+    Set regex = CreateObject("VBScript.RegExp")
+    regex.IgnoreCase = True
+    regex.Global = True
+    regex.Pattern = "(\d+)\s*分钟"   ' 提取分钟
+    If regex.Test(task) Then
+        countdownMinutes = CInt(regex.Execute(task)(0).SubMatches(0))
+    Else
+        countdownMinutes = 0
+    End If
+
+    regex.Pattern = "(\d+)\s*秒"  ' 提取秒
+    If regex.Test(task) Then
+        countdownSeconds = CInt(regex.Execute(task)(0).SubMatches(0))
+    Else
+        countdownSeconds = 0
+    End If
+
+    Debug.Print "提取的分钟数: " & countdownMinutes & " 秒数: " & countdownSeconds
+End If
+
+    ' 检查暂停状态
+    If isPaused Then
+        Exit Do ' 如果处于暂停状态，退出循环
+    End If
+
+Loop While InStr(task, "前进") > 0 Or InStr(task, "后退") > 0
+
+' 在循环结束后执行倒计时任务
+If countdownMinutes > 0 Then
+    StartCountdown countdownMinutes, CInt(countdownSeconds), playerNames(currentPlayer), diceRoll, newPosition, task ' 启动倒计时
+End If
+Else ' 默认逻辑
+loopCount = 0
+maxLoopCount = 10
+isPaused = False ' 初始化暂停状态
+countdownMinutes = 0 ' 初始化倒计时为0
+hasMovedForward = False ' 用于标记是否已经执行了前进操作
+
+Do
+    ' 获取任务并处理
+    newPosition = playerPositions(currentPlayer)
+    task = ws.Range(获取棋盘单元格(newPosition).Address).Value
+    ws.Range("M1").Value = playerNames(currentPlayer) & " 任务：" & task
+
+    ' 处理前进任务，只执行一次
+    If InStr(task, "前进") > 0 And Not hasMovedForward Then
+        move = Val(Split(task, "前进")(1))
+        newPosition = Application.Min(newPosition + move, maxCells)
+        hasMovedForward = True ' 执行前进后，设置标记为已前进
+
+        ' 更新任务信息
+        task = task & " (前进 " & move & "步, 新位置: " & newPosition & ")"
+    End If
+
+    ' 处理后退任务，只在没有执行前进时执行
+    If InStr(task, "后退") > 0 And Not hasMovedForward Then
+        move = Val(Split(task, "后退")(1))
+        newPosition = Application.Max(newPosition - move, 0)
+
+        ' 更新任务信息
+        task = task & " (后退 " & move & "步, 新位置: " & newPosition & ")"
+    End If
+
+    ' 更新玩家位置
+    playerPositions(currentPlayer) = newPosition
+
+    ' 检查位置是否合法
+    If newPosition < 0 Or newPosition > maxCells Then
+        MsgBox "新位置越界！"
+        Exit Do
+    End If
+
+    ' 处理任务：回到起点、终点
+    If InStr(task, "起点") > 0 Then
+        newPosition = 0
+        playerCanMove(currentPlayer) = False
+        playerPositions(currentPlayer) = newPosition
+        task = task & " (回到起点，位置: " & newPosition & ")"
+    End If
+    If InStr(task, "终点") > 0 Then
+        newPosition = maxCells
+        playerPositions(currentPlayer) = newPosition
+        task = task & " (到达终点，位置: " & newPosition & ")"
+    End If
+
+    ' 处理暂停任务
+    If InStr(task, "暂停") > 0 Then
+        playerPauseRounds(currentPlayer) = Val(Split(task, "暂停")(1))
+        isPaused = True ' 设置暂停状态
+    End If
+
+    ' 提取倒计时任务（不立即启动）
+If InStr(task, "分钟") > 0 Or InStr(task, "秒") > 0 Then
+    Set regex = CreateObject("VBScript.RegExp")
+    regex.IgnoreCase = True
+    regex.Global = True
+    regex.Pattern = "(\d+)\s*分钟"   ' 提取分钟
+    If regex.Test(task) Then
+        countdownMinutes = CInt(regex.Execute(task)(0).SubMatches(0))
+    Else
+        countdownMinutes = 0
+    End If
+
+    regex.Pattern = "(\d+)\s*秒"  ' 提取秒
+    If regex.Test(task) Then
+        countdownSeconds = CInt(regex.Execute(task)(0).SubMatches(0))
+    Else
+        countdownSeconds = 0
+    End If
+
+    Debug.Print "提取的分钟数: " & countdownMinutes & " 秒数: " & countdownSeconds
+End If
+
+    ' 检查暂停状态
+    If isPaused Then
+        Exit Do ' 如果处于暂停状态，退出循环
+    End If
+
+    ' 增加loopCount以避免无限循环
+    loopCount = loopCount + 1
+    If loopCount >= maxLoopCount Then
+        Exit Do
+    End If
+
+Loop
+
+' 在循环结束后执行倒计时任务
+If countdownMinutes > 0 Or countdownSeconds > 0 Then
+   StartCountdown countdownMinutes, CInt(countdownSeconds), playerNames(currentPlayer), diceRoll, newPosition, task
+ ' 启动倒计时
+End If
+End If
+
+    ' 最后更新新位置的颜色
+    If newPosition <= maxCells Then
+        ws.Range(获取棋盘单元格(newPosition).Address).Interior.Color = playerColors(currentPlayer - 1)
+    End If
+
+    ' 显示任务并更新位置信息到M列
+    AppendTaskAndUpdatePosition diceRoll, newPosition, currentPlayer
+
+    ' 检查是否有玩家到达最后一格
+    If newPosition = maxCells And playerRanks(currentPlayer) = 0 Then
+    Debug.Print playerNames(currentPlayer) & " 到达终点！"
+        playerRanks(currentPlayer) = finishedPlayers + 1
+        finishedPlayers = finishedPlayers + 1
+        winners = winners & playerNames(currentPlayer) & " "
+        MsgBox "恭喜玩家" & playerNames(currentPlayer) & " 到达终点！", vbInformation
+    End If
+
+    ' 检查是否所有玩家都到达最后一格
+    If finishedPlayers >= playerCount Then
+    Debug.Print "所有玩家已完成，游戏结束。赢家: " & winners
+        gameEnded = True
+        DisplayWinners
+        Exit Sub
+    End If
+
+NextPlayer:
+    currentPlayer = (currentPlayer Mod playerCount) + 1
+    Do While playerRanks(currentPlayer) > 0
+        currentPlayer = (currentPlayer Mod playerCount) + 1
+    Loop
+    ws.Range("F1").Value = playerNames(currentPlayer) & " 准备掷骰子"
+End Sub
+Sub StartCountdown(minutes As Integer, Seconds As Integer, playerName As String, diceRoll As Integer, newPosition As Integer, task As String)
+    ' 弹出确认框，提示是否开始倒计时
+    Dim response As VbMsgBoxResult
+    response = MsgBox("是否开始倒计时？", vbYesNo + vbQuestion, "开始倒计时")
+    
+    ' 如果用户点击“是” (vbYes)，则继续执行倒计时
+    If response = vbYes Then
+    Dim endTime As Double
+    endTime = Timer + (minutes * 60) + Seconds
+
+        ' 获取工作表和超级表格
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+    ' 检查是否已存在超级表格（ListObject），如果没有则创建
+    On Error Resume Next
+    Set tbl = ws.ListObjects("SuperTable")  ' 假设超级表格名称是 SuperTable
+    On Error GoTo 0
+    
+    ' 如果没有找到表格，创建一个新的超级表格
+    If tbl Is Nothing Then
+        Set tbl = ws.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=ws.Range("Q1:U1"), _
+            XlListObjectHasHeaders:=xlYes)
+        tbl.Name = "SuperTable"  ' 设置表格名称
+End If
+    ' 在表格中添加新的一行
+    Dim taskRow As Integer
+    taskRow = tbl.ListRows.Count + 1
+    
+    ' 在表格的新增行中填充数据
+    tbl.ListRows.Add
+    tbl.DataBodyRange(taskRow, 1).Value = playerName         ' 玩家名称
+    tbl.DataBodyRange(taskRow, 2).Value = diceRoll           ' 掷骰子点数
+    tbl.DataBodyRange(taskRow, 3).Value = newPosition        ' 新位置
+    tbl.DataBodyRange(taskRow, 4).Value = task               ' 任务描述
+    tbl.DataBodyRange(taskRow, 5).Value = "倒计时：" & (minutes * 60) & "秒" ' 初始倒计时
+
+    ' 标记该玩家为倒计时状态，暂停其行动
+    Dim currentPlayerIndex As Integer
+    currentPlayerIndex = GetPlayerIndexFromName(playerName)
+    playerActionPaused(currentPlayerIndex) = True
+
+    ' 更新计时器数组
+    timersCount = timersCount + 1
+    ReDim Preserve timers(0 To timersCount - 1)
+    ReDim Preserve pausedTime(0 To timersCount - 1)
+    ReDim Preserve isPaused(0 To timersCount - 1)
+    ReDim Preserve countdownActive(0 To timersCount - 1)
+
+    timers(timersCount - 1) = Array(endTime, taskRow, countdownMsg)
+    pausedTime(timersCount - 1) = 0
+    isPaused(timersCount - 1) = False
+    countdownActive(timersCount - 1) = True
+    
+    If ControlTime Then
+        CreateControlButtons taskRow, timersCount - 1
+    End If
+    
+    UpdateCountdown
+        Else
+        MsgBox "倒计时已取消！", vbInformation, "取消倒计时"
+    End If
+End Sub
+
+Sub UpdateCountdown()
+    Dim currentTime As Double
+    currentTime = Timer
+    Debug.Print "timersCount: " & timersCount
+
+    Dim i As Integer
+    Dim timersToRemove() As Integer
+    Dim removeCount As Integer
+    removeCount = 0
+    
+    ' 获取工作表和超级表格
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    Set tbl = ws.ListObjects("SuperTable")  ' 获取超级表格
+
+
+    ' 遍历计时器数组
+    For i = 0 To timersCount - 1
+        If countdownActive(i) Then
+            Dim timerInfo As Variant
+            timerInfo = timers(i)
+
+            If currentTime < timerInfo(0) Then
+                Dim remainingTime As Integer
+                remainingTime = Int(timerInfo(0) - currentTime)
+               tbl.DataBodyRange.cells(timerInfo(1), 5).Value = remainingTime & "秒"
+            Else
+                ' 倒计时结束时更新倒计时列
+                tbl.DataBodyRange.cells(timerInfo(1), 5).Value = "倒计时结束！"
+                
+                ' 倒计时结束后，解除玩家的行动暂停
+                Dim taskRow As Integer
+                taskRow = timerInfo(1)
+                
+                ' 获取玩家名称
+                Dim playerName As String
+                playerName = tbl.DataBodyRange(taskRow, 1).Value
+                Debug.Print "倒计时结束，玩家名称: " & playerName
+
+                ' 获取玩家的索引
+                Dim currentPlayerIndex As Integer
+                currentPlayerIndex = GetPlayerIndexFromName(playerName)
+
+                ' 确保获取到有效的玩家索引
+                If currentPlayerIndex <> -1 Then
+                    playerActionPaused(currentPlayerIndex) = False ' 解除暂停
+                Else
+                    Debug.Print "未能找到玩家: " & playerName
+                End If
+
+                ' 将此计时器标记为不活动，避免重复检查
+                countdownActive(i) = False
+
+                ' 将计时器添加到待移除列表
+                removeCount = removeCount + 1
+                ReDim Preserve timersToRemove(1 To removeCount)
+                timersToRemove(removeCount) = i
+            End If
+        End If
+    Next i
+
+    ' 逆序移除已结束的计时器
+    For i = removeCount To 1 Step -1
+        Dim removeIndex As Integer
+        removeIndex = timersToRemove(i)
+        
+        ' 将最后一个计时器的信息复制到当前索引位置
+        If removeIndex < timersCount - 1 Then
+            timers(removeIndex) = timers(timersCount - 1)
+            pausedTime(removeIndex) = pausedTime(timersCount - 1)
+            isPaused(removeIndex) = isPaused(timersCount - 1)
+            countdownActive(removeIndex) = countdownActive(timersCount - 1)
+        End If
+        timersCount = timersCount - 1
+    Next i
+
+    ' 调整数组大小
+    If timersCount > 0 Then
+        ReDim Preserve timers(0 To timersCount - 1)
+        ReDim Preserve pausedTime(0 To timersCount - 1)
+        ReDim Preserve isPaused(0 To timersCount - 1)
+        ReDim Preserve countdownActive(0 To timersCount - 1)
+    End If
+
+    ' 安排下一次更新
+    If timersCount > 0 Then
+        nextUpdateTime = Now + TimeValue("00:00:01")
+        Application.OnTime nextUpdateTime, "UpdateCountdown"
+    End If
+End Sub
+
+
+Sub CreateControlButtons(taskRow As Integer, timerIndex As Integer)
+' 判断是否使用时间控制
+    If Not ControlTime Then Exit Sub
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+        ' 删除与当前 taskRow 相关的旧按钮
+    Dim btn As Object
+    For Each btn In ws.Buttons
+        If InStr(btn.Name, "_" & taskRow) > 0 Then
+            btn.Delete
+        End If
+    Next btn
+
+    ' 创建按钮的名称和动作
+    Dim buttonCaptions As Variant
+    Dim buttonActions As Variant
+    buttonCaptions = Array("暂停", "继续", "结束")
+    buttonActions = Array("PauseCountdown", "ContinueCountdown", "EndCountdown")
+
+    Dim j As Integer
+    For j = LBound(buttonCaptions) To UBound(buttonCaptions)
+        With ws.Buttons.Add(ws.cells(taskRow, 22 + j * 1).Left, ws.cells(taskRow, 22).Top, 60, 15)
+            .Caption = buttonCaptions(j)
+            .OnAction = "'" & buttonActions(j) & "(" & timerIndex & ")'" ' 确保正确链接到对应的函数
+            .Name = buttonActions(j) & "Button_" & taskRow
+        End With
+    Next j
+End Sub
+
+Sub PauseCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetRowFromButton()
+    
+    ' 取消任何计划的 UpdateCountdown 调用
+    On Error Resume Next
+    Application.OnTime nextUpdateTime, "UpdateCountdown", , False
+    On Error GoTo 0
+    
+    pausedTime(timerIndex) = Timer
+    isPaused(timerIndex) = True
+    countdownActive(timerIndex) = False
+End Sub
+Sub ContinueCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetRowFromButton()
+    If Not isPaused(timerIndex) Then Exit Sub
+
+    Dim newEndTime As Double
+    Dim timerInfo As Variant
+    timerInfo = timers(timerIndex)
+
+    newEndTime = timerInfo(0) + (Timer - pausedTime(timerIndex)) ' 更新结束时间
+     Debug.Print "Continuing timer at index: " & timerIndex
+    timers(timerIndex)(0) = newEndTime
+    isPaused(timerIndex) = False
+    countdownActive(timerIndex) = True
+    UpdateCountdown
+End Sub
+
+Sub EndCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetRowFromButton()
+
+    ' 确保存在计时器
+    If timersCount <= 0 Then
+        Debug.Print "没有计时器可以移除！"
+        Exit Sub
+    End If
+
+    ' 检查 timerIndex 是否在有效范围内
+    If timerIndex < 0 Or timerIndex >= timersCount Then
+        Debug.Print "索引超出范围: " & timerIndex
+        Exit Sub
+    End If
+    
+
+      ' 获取玩家名称和任务描述列位置，并更新倒计时结束信息
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    Set tbl = ws.ListObjects("SuperTable")
+
+    Dim playerName As String
+    playerName = tbl.DataBodyRange(taskRow, 1).Value       ' 获取玩家名称
+    tbl.DataBodyRange(taskRow, 5).Value = "倒计时结束！"   ' 更新倒计时列
+
+    ' 移除指定计时器并调整数组
+    If timersCount = 1 Then
+        ' 仅剩一个计时器时，直接清空数组
+        timersCount = 0
+        Erase timers, pausedTime, isPaused, countdownActive
+    Else
+        ' 通过移动数组来移除指定计时器
+        Dim i As Integer
+        For i = timerIndex To timersCount - 2
+            timers(i) = timers(i + 1)
+            pausedTime(i) = pausedTime(i + 1)
+            isPaused(i) = isPaused(i + 1)
+            countdownActive(i) = countdownActive(i + 1)
+        Next i
+
+        timersCount = timersCount - 1
+        ReDim Preserve timers(0 To timersCount - 1)
+        ReDim Preserve pausedTime(0 To timersCount - 1)
+        ReDim Preserve isPaused(0 To timersCount - 1)
+        ReDim Preserve countdownActive(0 To timersCount - 1)
+    End If
+
+    ' 解除玩家的暂停状态
+    playerName = tbl.DataBodyRange(taskRow, 1).Value
+
+    Dim currentPlayerIndex As Integer
+    currentPlayerIndex = GetPlayerIndexFromName(playerName)
+    If currentPlayerIndex <> -1 Then
+        playerActionPaused(currentPlayerIndex) = False
+    Else
+        Debug.Print "无效的玩家索引，玩家名称: " & playerName
+    End If
+    ' 更新控制按钮
+    For i = 0 To timersCount - 1
+        Dim remainingTaskRow As Integer
+        remainingTaskRow = timers(i)(1)
+        CreateControlButtons remainingTaskRow, i
+    Next i
+End Sub
+
+
+Function GetPlayerIndexFromName(playerName As String) As Integer
+    Dim i As Integer
+    For i = 1 To playerCount
+     Debug.Print "正在检查: " & playerNames(i) & " 与 " & playerName
+        If playerNames(i) = playerName Then
+            GetPlayerIndexFromName = i ' 找到对应玩家并返回索引
+            Exit Function
+        End If
+    Next i
+    ' 如果未找到玩家，返回-1
+    GetPlayerIndexFromName = -1
+End Function
+Function GetRowFromButton() As Integer
+    Dim parts() As String
+    Dim buttonName As String
+    buttonName = Application.Caller
+    parts = Split(buttonName, "_")
+
+    If UBound(parts) >= 1 Then
+        GetRowFromButton = CInt(parts(1))
+    Else
+        GetRowFromButton = -1
+    End If
+End Function
+
+Sub CreateSetCustomTimeButton()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+    ' 删除现有的按钮以避免重复
+    On Error Resume Next
+    ws.Buttons("SetCustomTimeButton").Delete
+    On Error GoTo 0
+    
+    ' 创建按钮用于设置自定义时间
+    Dim btn As Object
+    Set btn = ws.Buttons.Add(ws.cells(14, 4).Left + (ws.cells(14, 5).Left - ws.cells(14, 4).Left) / 2 + 36, _
+                         ws.cells(14, 4).Top, 75.75, 21.75)
+    btn.Caption = "设置自定义时间"
+    btn.OnAction = "SetCustomCountdownTime"
+    btn.Name = "SetCustomTimeButton"
+End Sub
+Sub SetCustomCountdownTime()
+    ' 弹出输入框让玩家输入倒计时的时间（单位：分钟）
+    Dim inputTime As String
+    inputTime = InputBox("请输入倒计时的时间（分钟）：", "设置倒计时", "5") ' 默认时间为5分钟
+
+    ' 检查输入是否有效
+    If IsNumeric(inputTime) And Val(inputTime) > 0 Then
+        Dim minutes As Integer
+        minutes = CInt(inputTime)
+        
+        ' 计算上一位玩家的索引
+        Dim lastPlayerIndex As Integer
+        If currentPlayer > 1 Then
+            lastPlayerIndex = currentPlayer - 1
+        Else
+            lastPlayerIndex = playerCount ' 如果 currentPlayer 是第一个玩家，上一位玩家是最后一个
+        End If
+        
+        ' 计算上一位玩家的索引
+        If currentPlayer > 1 Then
+            lastPlayerIndex = currentPlayer - 1
+        Else
+            lastPlayerIndex = playerCount ' 如果 currentPlayer 是第一个玩家，上一位玩家是最后一个
+        End If
+        
+        ' 输出调试信息以检查索引
+        Debug.Print "当前玩家: " & currentPlayer
+        Debug.Print "上一位玩家的索引: " & lastPlayerIndex
+        Debug.Print "上一位玩家的名字: " & playerNames(lastPlayerIndex)
+
+        ' 检查上一位玩家是否被暂停，如果被暂停，则继续向上索引，直到找到一个未暂停的玩家
+        Do While playerActionPaused(lastPlayerIndex) ' 如果当前玩家被暂停
+            lastPlayerIndex = lastPlayerIndex - 1 ' 向上一位玩家移动
+            
+            ' 如果索引小于1，则循环回到最后一个玩家
+            If lastPlayerIndex < 1 Then
+                lastPlayerIndex = playerCount
+            End If
+            
+            ' 输出调试信息，检查当前检查的玩家
+            Debug.Print "检查玩家 " & playerNames(lastPlayerIndex) & " 是否被暂停: " & playerActionPaused(lastPlayerIndex)
+        Loop
+
+       ' 确保上一位玩家在有效范围内
+        If lastPlayerIndex >= 1 And lastPlayerIndex <= playerCount Then
+            Dim lastPlayerName As String
+            lastPlayerName = playerNames(lastPlayerIndex)
+            Dim diceRoll As Integer
+           Dim newPosition As Integer
+           Dim task As String
+
+            ' 启动倒计时，使用上一位玩家
+            Debug.Print "Setting countdown for last player: " & lastPlayerName
+            StartCustomCountdown minutes, lastPlayerName, diceRoll, newPosition, task ' 使用 lastPlayer 而不是 currentPlayer
+        Else
+            MsgBox "无法找到有效的上一位玩家，索引超出范围: " & lastPlayerIndex
+        End If
+    Else
+        MsgBox "请输入有效的时间！"
+    End If
+End Sub
+Sub StartCustomCountdown(minutes As Integer, playerName As String, diceRoll As Integer, newPosition As Integer, task As String)
+    If minutes <= 0 Then Exit Sub
+    Dim endTime As Double
+    endTime = Timer + (minutes * 60)
+    
+        ' 获取工作表和超级表格
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+    ' 检查是否已存在超级表格（ListObject），如果没有则创建
+    On Error Resume Next
+    Set tbl = ws.ListObjects("SuperTable")  ' 假设超级表格名称是 SuperTable
+    On Error GoTo 0
+    
+    ' 在表格中添加新的一行
+    Dim taskRow As Integer
+    taskRow = tbl.ListRows.Count + 1
+    
+    ' 在表格的新增行中填充数据
+    tbl.ListRows.Add
+    tbl.DataBodyRange(taskRow, 1).Value = playerName         ' 玩家名称
+    tbl.DataBodyRange(taskRow, 2).Value = diceRoll           ' 掷骰子点数
+    tbl.DataBodyRange(taskRow, 3).Value = newPosition        ' 新位置
+    tbl.DataBodyRange(taskRow, 4).Value = task               ' 任务描述
+    tbl.DataBodyRange(taskRow, 5).Value = "倒计时：" & (minutes * 60) & "秒" ' 初始倒计时
+    
+    ' 使用 lastPlayer 而不是 playerName，确保倒计时显示的是上一位玩家的名字
+    Dim countdownMsg As String
+    countdownMsg = " 设置了自定义倒计时 " & minutes & " 分钟。" ' 使用 lastPlayer
+
+    tbl.DataBodyRange(taskRow, 4).Value = countdownMsg
+    
+    ' 标记该玩家为倒计时状态，暂停其行动
+    Dim currentPlayerIndex As Integer
+    currentPlayerIndex = GetCurrentPlayerName(playerName)
+    playerActionPaused(currentPlayerIndex) = True
+
+    ' 更新计时器数组
+    timersCount = timersCount + 1
+    ReDim Preserve timers(0 To timersCount - 1)
+    ReDim Preserve pausedTime(0 To timersCount - 1)
+    ReDim Preserve isPaused(0 To timersCount - 1)
+    ReDim Preserve countdownActive(0 To timersCount - 1)
+
+    timers(timersCount - 1) = Array(endTime, taskRow, countdownMsg)
+    pausedTime(timersCount - 1) = 0
+    isPaused(timersCount - 1) = False
+    countdownActive(timersCount - 1) = True
+    
+    If ControlTime Then
+       CreateControlButtonsForCustomCountdown taskRow, timersCount - 1
+    End If
+    
+    UpdateCustomCountdown
+End Sub
+
+Sub UpdateCustomCountdown()
+    Dim currentTime As Double
+    currentTime = Timer
+    Debug.Print "timersCount: " & timersCount
+
+    Dim i As Integer
+    Dim timersToRemove() As Integer
+    Dim removeCount As Integer
+    removeCount = 0
+    
+        ' 获取工作表和超级表格
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    Set tbl = ws.ListObjects("SuperTable")  ' 获取超级表格
+    
+     ' 遍历计时器数组
+    For i = 0 To timersCount - 1
+        If countdownActive(i) Then
+            Dim timerInfo As Variant
+            timerInfo = timers(i)
+
+            If currentTime < timerInfo(0) Then
+                Dim remainingTime As Integer
+                remainingTime = Int(timerInfo(0) - currentTime)
+                tbl.DataBodyRange.cells(timerInfo(1), 5).Value = remainingTime & "秒"
+            Else
+                tbl.DataBodyRange.cells(timerInfo(1), 5).Value = " 倒计时结束！"
+                
+                ' 倒计时结束后，解除玩家的行动暂停
+                Dim taskRow As Integer
+                taskRow = timerInfo(1)
+                
+                ' 获取玩家名称
+                Dim playerName As String
+                playerName = tbl.DataBodyRange(taskRow, 1).Value
+                Debug.Print "倒计时结束，玩家名称: " & playerName ' 检查玩家名称
+
+                ' 获取玩家的索引
+                Dim currentPlayerIndex As Integer
+                currentPlayerIndex = GetCurrentPlayerName(playerName)
+
+                ' 确保获取到有效的玩家索引
+                If currentPlayerIndex <> -1 Then
+                    playerActionPaused(currentPlayerIndex) = False ' 解除暂停
+                Else
+                    Debug.Print "未能找到玩家: " & playerName
+                End If
+
+                ' 将此计时器标记为不活动，避免重复检查
+                countdownActive(i) = False
+
+                 ' 将计时器添加到待移除列表
+                removeCount = removeCount + 1
+                ReDim Preserve timersToRemove(1 To removeCount)
+                timersToRemove(removeCount) = i
+            End If
+        End If
+    Next i
+
+   ' 逆序移除已结束的计时器
+    For i = removeCount To 1 Step -1
+        Dim removeIndex As Integer
+        removeIndex = timersToRemove(i)
+        
+        ' 将最后一个计时器的信息复制到当前索引位置
+        If removeIndex < timersCount - 1 Then
+            timers(removeIndex) = timers(timersCount - 1)
+            pausedTime(removeIndex) = pausedTime(timersCount - 1)
+            isPaused(removeIndex) = isPaused(timersCount - 1)
+            countdownActive(removeIndex) = countdownActive(timersCount - 1)
+        End If
+        timersCount = timersCount - 1
+    Next i
+
+    ' 调整数组大小
+    If timersCount > 0 Then
+        ReDim Preserve timers(0 To timersCount - 1)
+        ReDim Preserve pausedTime(0 To timersCount - 1)
+        ReDim Preserve isPaused(0 To timersCount - 1)
+        ReDim Preserve countdownActive(0 To timersCount - 1)
+    End If
+    
+    ' 安排下一次更新
+    If timersCount > 0 Then
+        nextUpdateTime = Now + TimeValue("00:00:01")
+        Application.OnTime nextUpdateTime, "UpdateCustomCountdown"
+    End If
+End Sub
+
+Sub CreateControlButtonsForCustomCountdown(taskRow As Integer, timerIndex As Integer)
+' 判断是否使用时间控制
+    If Not ControlTime Then Exit Sub
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+            ' 删除与当前 taskRow 相关的旧按钮
+    Dim btn As Object
+    For Each btn In ws.Buttons
+        If InStr(btn.Name, "_" & taskRow) > 0 Then
+            btn.Delete
+        End If
+    Next btn
+
+    ' 创建按钮的名称和动作
+    Dim buttonCaptions As Variant
+    Dim buttonActions As Variant
+    buttonCaptions = Array("暂停", "继续", "结束")
+    buttonActions = Array("PauseCountdown", "ContinueCountdown", "EndCountdown")
+
+    Dim j As Integer
+    For j = LBound(buttonCaptions) To UBound(buttonCaptions)
+        With ws.Buttons.Add(ws.cells(taskRow, 22 + j * 1).Left, ws.cells(taskRow, 22).Top, 60, 15)
+            .Caption = buttonCaptions(j)
+            .OnAction = "'" & buttonActions(j) & "(" & timerIndex & ")'" ' 确保正确链接到对应的函数
+            .Name = buttonActions(j) & "Button_" & taskRow
+        End With
+    Next j
+End Sub
+
+Sub PauseCustomCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetCustomRowFromButton()
+    
+    ' 取消任何计划的 UpdateCountdown 调用
+    On Error Resume Next
+    Application.OnTime nextUpdateTime, "UpdateCustomCountdown", , False
+    On Error GoTo 0
+    
+    pausedTime(timerIndex) = Timer
+    isPaused(timerIndex) = True
+    countdownActive(timerIndex) = False
+End Sub
+Sub ContinueCustomCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetCustomRowFromButton()
+    If Not isPaused(timerIndex) Then Exit Sub
+
+    Dim newEndTime As Double
+    Dim timerInfo As Variant
+    timerInfo = timers(timerIndex)
+
+    newEndTime = timerInfo(0) + (Timer - pausedTime(timerIndex)) ' 更新结束时间
+     Debug.Print "Continuing timer at index: " & timerIndex
+    timers(timerIndex)(0) = newEndTime
+    isPaused(timerIndex) = False
+    countdownActive(timerIndex) = True
+    UpdateCountdown
+End Sub
+
+Sub EndCustomCountdown(timerIndex As Integer)
+    Dim taskRow As Integer
+    taskRow = GetCustomRowFromButton()
+
+    ' 检查是否有计时器
+    If timersCount <= 0 Then
+        Debug.Print "No timers to remove!"
+        Exit Sub
+    End If
+    
+          ' 获取玩家名称和任务描述列位置，并更新倒计时结束信息
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    Set tbl = ws.ListObjects("SuperTable")
+
+
+    ' 获取玩家名称
+    Dim playerName As String
+    playerName = tbl.DataBodyRange(taskRow, 1).Value
+    ' 获取玩家的索引
+    Dim currentPlayerIndex As Integer
+    currentPlayerIndex = GetCurrentPlayerName(playerName)
+    Debug.Print "Current player index: " & currentPlayerIndex
+
+    ' 解除暂停
+    playerActionPaused(currentPlayerIndex) = False ' 解除暂停
+
+    ' 更新上一位玩家为当前玩家
+    lastPlayer = playerNames(currentPlayer) ' 设置当前玩家为下一轮的上一位玩家
+
+    ' 清理计时器
+    If timersCount = 1 Then
+        timersCount = 0
+        Erase timers
+        Debug.Print "Timers array cleared!"
+    Else
+        timers(timerIndex) = timers(timersCount - 1)
+        timersCount = timersCount - 1
+        Debug.Print "Timers count updated to: " & timersCount
+        ReDim Preserve timers(0 To timersCount - 1)
+    End If
+
+    ' 更新剩余计时器的按钮
+    Dim i As Integer
+    For i = 0 To timersCount - 1
+        Dim remainingTaskRow As Integer
+        remainingTaskRow = timers(i)(1)
+        CreateControlButtons remainingTaskRow, i
+    Next i
+End Sub
+Function GetCurrentPlayerName(playerName As String) As Integer
+    Dim i As Integer
+    For i = 1 To playerCount
+     Debug.Print "正在检查: " & playerNames(i) & " 与 " & playerName
+        If playerNames(i) = playerName Then
+            GetCurrentPlayerName = i ' 找到对应玩家并返回索引
+            Exit Function
+        End If
+    Next i
+    ' 如果未找到玩家，返回-1
+    GetCurrentPlayerName = -1
+End Function
+Function GetCustomRowFromButton() As Integer
+    Dim parts() As String
+    Dim buttonName As String
+    buttonName = Application.Caller
+    parts = Split(buttonName, "_")
+
+    If UBound(parts) >= 1 Then
+        GetCustomRowFromButton = CInt(parts(1))
+    Else
+        GetCustomRowFromButton = -1
+    End If
+End Function
+
+
+Sub AppendTaskAndUpdatePosition(diceRoll As Integer, newPosition As Integer, playerIndex As Integer)
+    Dim taskRow As Integer
+    Dim task As String
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim existingTaskRow As Integer
+    Dim playerName As String
+    
+    ' 获取玩家名称和任务描述
+    playerName = playerNames(playerIndex)
+    task = 获取棋盘单元格(newPosition).Value
+    
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+    ' 检查是否已经有超级表格（ListObject）
+    On Error Resume Next
+    Set tbl = ws.ListObjects("SuperTable")  ' 假设超级表的名称是 SuperTable
+    On Error GoTo 0
+    
+    ' 如果没有超级表，则创建一个新的表
+    If tbl Is Nothing Then
+        ' 创建表格并定义表头
+        Set tbl = ws.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=ws.Range("Q1:U1"), _
+            XlListObjectHasHeaders:=xlYes)
+        tbl.Name = "SuperTable"  ' 设置表格名称
+        ' 设置表头名称
+        tbl.HeaderRowRange.cells(1, 1).Value = "玩家名称"        ' 第1列 - 玩家名称
+        tbl.HeaderRowRange.cells(1, 2).Value = "掷骰子点数"      ' 第2列 - 掷骰子点数
+        tbl.HeaderRowRange.cells(1, 3).Value = "新位置"          ' 第3列 - 新位置
+        tbl.HeaderRowRange.cells(1, 4).Value = "任务描述"        ' 第4列 - 任务描述
+        tbl.HeaderRowRange.cells(1, 5).Value = "倒计时"          ' 第5列 - 倒计时
+    End If
+    
+    ' 检查该任务是否已经存在（通过玩家名称和任务描述）
+    existingTaskRow = -1
+    For taskRow = 1 To tbl.ListRows.Count
+        If tbl.DataBodyRange.cells(taskRow, 1).Value = playerName And tbl.DataBodyRange.cells(taskRow, 4).Value = task Then
+            existingTaskRow = taskRow
+            Exit For
+        End If
+    Next taskRow
+    
+    ' 如果任务已经存在，则跳过插入
+    If existingTaskRow <> -1 Then
+        Exit Sub
+    End If
+    
+    ' 如果任务不存在，则插入新的任务
+    taskRow = tbl.ListRows.Count + 1
+    tbl.ListRows.Add
+    tbl.DataBodyRange(taskRow, 1).Value = playerName         ' 玩家名称
+    tbl.DataBodyRange(taskRow, 2).Value = diceRoll           ' 掷骰子点数
+    tbl.DataBodyRange(taskRow, 3).Value = newPosition        ' 新位置
+    tbl.DataBodyRange(taskRow, 4).Value = task               ' 任务描述
+End Sub
+Sub DisplayWinners()
+    Dim winnerList As String
+    Dim i As Integer
+    winnerList = "获胜者名次：" & vbCrLf
+
+    For i = 1 To playerCount
+        winnerList = winnerList & playerNames(i) & ": 第" & playerRanks(i) & "名" & vbCrLf
+    Next i
+
+    ' 在M列中显示获胜者
+    With ThisWorkbook.Sheets("Sheet1")
+        .Range("M" & Rows.Count).End(xlUp).offset(1, 0).Value = "游戏结束！" & vbCrLf & winnerList
+    End With
+
+    MsgBox "游戏结束！" & vbCrLf & winnerList, vbInformation
+End Sub
+
+
