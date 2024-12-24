@@ -1,0 +1,22 @@
+Sub RandomNumberGenerator()
+    Dim randomNumber As Double
+    Dim row As Integer
+    Dim col As Integer
+
+    ' 设置生成随机数的范围
+    randomNumber = Rnd() * 100 ' 生成0到100之间的随机数
+
+    ' 选择一个特定单元格，这里选择A1单元格
+    row = 1
+    col = 1
+
+    ' 将随机数填入选定的单元格
+    Cells(row, col).Value = randomNumber
+
+    ' 也可以选择其他单元格并填入多个随机数
+    For row = 1 To 10
+        For col = 1 To 5
+            Cells(row, col).Value = Rnd() * 100 ' 填入1到100之间的随机数
+        Next col
+    Next row
+End Sub
